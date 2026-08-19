@@ -458,7 +458,7 @@ impl PrometheusMetricsDriver {
                 format!("{prefix}horizontal_adapter_uncomplete_promises"),
                 "The total amount of promises that were not fulfilled entirely by other nodes"
             ),
-            &["app_id", "port"]
+            &["app_id", "port", "request_type"]
         )
         .unwrap();
 

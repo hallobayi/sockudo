@@ -206,8 +206,12 @@ impl MetricsInterface for PrometheusMetricsDriver {
 
         debug!(app_id, "metrics: horizontal adapter resolve time recorded");
     }
-
-    fn track_horizontal_adapter_resolved_promises(&self, app_id: &str, resolved: bool) {
+    fn track_horizontal_adapter_resolved_promises(
+        &self,
+        app_id: &str,
+        resolved: bool,
+        request_type: &str,
+    ) {
         let tags = self.get_tags(app_id);
 
         if resolved {
@@ -215,14 +219,16 @@ impl MetricsInterface for PrometheusMetricsDriver {
                 .with_label_values(&tags)
                 .inc();
         } else {
+            let mut error_tags = tags.clone();
+            error_tags.push(request_type.to_string());
             self.horizontal_adapter_uncomplete_promises
-                .with_label_values(&tags)
+                .with_label_values(&error_tags)
                 .inc();
         }
 
         debug!(
             app_id,
-            resolved, "metrics: horizontal adapter promise recorded"
+            resolved, request_type, "metrics: horizontal adapter promise recorded"
         );
     }
 
