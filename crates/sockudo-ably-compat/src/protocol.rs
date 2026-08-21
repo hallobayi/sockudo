@@ -225,7 +225,7 @@ pub(crate) struct AblyProtocolMessage {
     pub(crate) res: Option<Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AblyAnnotation {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -250,6 +250,46 @@ pub(crate) struct AblyAnnotation {
     pub(crate) encoding: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) timestamp: Option<i64>,
+}
+
+impl<'de> Deserialize<'de> for AblyAnnotation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct Raw {
+            action: Option<u8>,
+            id: Option<String>,
+            serial: Option<String>,
+            message_serial: Option<String>,
+            #[serde(rename = "type")]
+            annotation_type: Option<String>,
+            name: Option<String>,
+            client_id: Option<String>,
+            count: Option<u64>,
+            data: Option<WireValue>,
+            encoding: Option<String>,
+            timestamp: Option<i64>,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        let (data, encoding) = normalize_wire_data::<D::Error>(raw.data, raw.encoding)?;
+        Ok(Self {
+            action: raw.action,
+            id: raw.id,
+            serial: raw.serial,
+            message_serial: raw.message_serial,
+            annotation_type: raw.annotation_type,
+            name: raw.name,
+            client_id: raw.client_id,
+            count: raw.count,
+            data,
+            encoding,
+            timestamp: raw.timestamp,
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Clone, Default)]
@@ -336,24 +376,7 @@ impl<'de> Deserialize<'de> for AblyMessage {
         D: Deserializer<'de>,
     {
         let raw = RawAblyMessage::deserialize(deserializer)?;
-        let (data, binary) = match raw.data {
-            Some(WireValue::Binary(bytes)) => (
-                Some(sonic_rs::json!(
-                    base64::engine::general_purpose::STANDARD.encode(bytes)
-                )),
-                true,
-            ),
-            Some(value) => (
-                Some(sonic_rs::to_value(&value).map_err(serde::de::Error::custom)?),
-                false,
-            ),
-            None => (None, false),
-        };
-        let encoding = if binary {
-            Some(append_encoding(raw.encoding.as_deref(), "base64"))
-        } else {
-            raw.encoding
-        };
+        let (data, encoding) = normalize_wire_data::<D::Error>(raw.data, raw.encoding)?;
         let mut version = raw.version;
         if let Some(version) = version.as_mut()
             && version.serial.is_empty()
@@ -399,6 +422,28 @@ fn append_encoding(existing: Option<&str>, component: &str) -> String {
         }
         Some(existing) => format!("{existing}/{component}"),
         None => component.to_string(),
+    }
+}
+
+fn normalize_wire_data<E>(
+    data: Option<WireValue>,
+    encoding: Option<String>,
+) -> Result<(Option<Value>, Option<String>), E>
+where
+    E: serde::de::Error,
+{
+    match data {
+        Some(WireValue::Binary(bytes)) => Ok((
+            Some(sonic_rs::json!(
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            )),
+            Some(append_encoding(encoding.as_deref(), "base64")),
+        )),
+        Some(value) => Ok((
+            Some(sonic_rs::to_value(&value).map_err(E::custom)?),
+            encoding,
+        )),
+        None => Ok((None, encoding)),
     }
 }
 
@@ -463,19 +508,7 @@ impl<'de> Deserialize<'de> for AblyPresenceMessage {
             extras: Option<WireValue>,
         }
         let raw = Raw::deserialize(deserializer)?;
-        let (data, encoding) = match raw.data {
-            Some(WireValue::Binary(bytes)) => (
-                Some(sonic_rs::json!(
-                    base64::engine::general_purpose::STANDARD.encode(bytes)
-                )),
-                Some(append_encoding(raw.encoding.as_deref(), "base64")),
-            ),
-            Some(value) => (
-                Some(sonic_rs::to_value(&value).map_err(serde::de::Error::custom)?),
-                raw.encoding,
-            ),
-            None => (None, raw.encoding),
-        };
+        let (data, encoding) = normalize_wire_data::<D::Error>(raw.data, raw.encoding)?;
         Ok(Self {
             id: raw.id,
             action: raw.action,

@@ -184,7 +184,7 @@ pub(crate) fn encode_protocol_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{ACTION_MESSAGE, AblyMessage, empty_protocol_message};
+    use crate::protocol::{ACTION_ANNOTATION, ACTION_MESSAGE, AblyMessage, empty_protocol_message};
     use proptest::prelude::*;
     use sonic_rs::JsonValueTrait;
 
@@ -295,6 +295,76 @@ mod tests {
             message.encoding.as_deref(),
             Some("cipher+aes-256-cbc/base64")
         );
+    }
+
+    #[test]
+    fn msgpack_annotation_binary_data_is_normalized_with_base64_encoding() {
+        #[derive(Serialize)]
+        struct Frame<'a> {
+            action: u8,
+            annotations: Vec<Annotation<'a>>,
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Annotation<'a> {
+            action: u8,
+            message_serial: &'a str,
+            #[serde(rename = "type")]
+            annotation_type: &'a str,
+            data: &'a [u8],
+            encoding: &'a str,
+        }
+        let frame = Frame {
+            action: ACTION_ANNOTATION,
+            annotations: vec![Annotation {
+                action: 0,
+                message_serial: "msg:1",
+                annotation_type: "reaction:unique.v1",
+                data: &[0xde, 0xad, 0xbe, 0xef],
+                encoding: "cipher+aes-256-cbc",
+            }],
+        };
+        let mut bytes = Vec::new();
+        let mut serializer = rmp_serde::Serializer::new(&mut bytes)
+            .with_struct_map()
+            .with_bytes(rmp_serde::config::BytesMode::ForceAll);
+        frame.serialize(&mut serializer).unwrap();
+
+        let decoded = decode_protocol_bytes(&bytes, AblyFormat::MsgPack).unwrap();
+        let annotation = &decoded.annotations.unwrap()[0];
+        assert_eq!(
+            annotation.data.as_ref().and_then(sonic_rs::Value::as_str),
+            Some("3q2+7w==")
+        );
+        assert_eq!(
+            annotation.encoding.as_deref(),
+            Some("cipher+aes-256-cbc/base64")
+        );
+    }
+
+    #[test]
+    fn json_annotation_structured_data_preserves_value_and_encoding() {
+        let frame = br#"{
+            "action": 21,
+            "annotations": [{
+                "action": 0,
+                "messageSerial": "msg:1",
+                "type": "metadata:distinct.v1",
+                "data": {"encrypted": false, "source": "json"},
+                "encoding": "json"
+            }]
+        }"#;
+
+        let decoded = decode_protocol_bytes(frame, AblyFormat::Json).unwrap();
+        let annotation = &decoded.annotations.unwrap()[0];
+        assert_eq!(
+            annotation.data,
+            Some(sonic_rs::json!({
+                "encrypted": false,
+                "source": "json"
+            }))
+        );
+        assert_eq!(annotation.encoding.as_deref(), Some("json"));
     }
 
     #[test]
