@@ -50,6 +50,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Check published metrics build without Tokio unstable APIs
+        run: cargo check -p sockudo-metrics --config 'build.rustflags=[]'
+
       - name: Check Linux installer
         run: |
           sh -n install.sh
