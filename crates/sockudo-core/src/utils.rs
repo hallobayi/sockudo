@@ -309,6 +309,8 @@ pub async fn validate_channel_name(app: &App, channel: &str) -> crate::error::Re
             || c == '_'
             || c == '='
             || c == '@'
+            || c == ','
+            || c == ';'
             || c == '.'
             || c == ':'
             || c == '#'
@@ -321,6 +323,8 @@ pub async fn validate_channel_name(app: &App, channel: &str) -> crate::error::Re
                     && *c != '_'
                     && *c != '='
                     && *c != '@'
+                    && *c != ','
+                    && *c != ';'
                     && *c != '.'
                     && *c != ':'
                     && *c != '#'
@@ -565,6 +569,8 @@ mod tests {
         // Test valid channel names
         assert!(validate_channel_name(&app, "test-123").await.is_ok());
         assert!(validate_channel_name(&app, "user@domain").await.is_ok());
+        assert!(validate_channel_name(&app, "a,b-channel").await.is_ok());
+        assert!(validate_channel_name(&app, "a;b-channel").await.is_ok());
         assert!(validate_channel_name(&app, "channel.name").await.is_ok());
         assert!(
             validate_channel_name(&app, "#server-to-user-123")
