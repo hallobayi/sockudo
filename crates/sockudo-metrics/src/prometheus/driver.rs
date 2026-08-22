@@ -1275,23 +1275,33 @@ impl PrometheusMetricsDriver {
 
         let num_workers = metrics.num_workers();
 
-        self.tokio_budget_forced_yield_count
-            .set(metrics.budget_forced_yield_count() as f64);
-        let mut total_polls: u64 = 0;
-        let mut total_poll_duration_ns: u64 = 0;
+        // These metrics require Tokio's unstable metrics API. Published crates must also compile
+        // without the repository-local `--cfg tokio_unstable` rustflag used by release builds.
+        #[cfg(tokio_unstable)]
+        {
+            self.tokio_budget_forced_yield_count
+                .set(metrics.budget_forced_yield_count() as f64);
+            let mut total_polls: u64 = 0;
+            let mut total_poll_duration_ns: u64 = 0;
 
-        for worker in 0..num_workers {
-            let worker_label = worker.to_string();
+            for worker in 0..num_workers {
+                let worker_label = worker.to_string();
+                let queue_depth = metrics.worker_local_queue_depth(worker);
 
-            let queue_depth = metrics.worker_local_queue_depth(worker);
+                self.tokio_worker_local_queue_depth
+                    .with_label_values(&[&worker_label])
+                    .set(queue_depth as f64);
 
-            self.tokio_worker_local_queue_depth
-                .with_label_values(&[&worker_label])
-                .set(queue_depth as f64);
+                let polls = metrics.worker_poll_count(worker);
+                total_polls += polls;
+                total_poll_duration_ns +=
+                    metrics.worker_total_busy_duration(worker).as_nanos() as u64;
+            }
 
-            let polls = metrics.worker_poll_count(worker);
-            total_polls += polls;
-            total_poll_duration_ns += metrics.worker_total_busy_duration(worker).as_nanos() as u64;
+            if total_polls > 0 {
+                let mean_poll_us = total_poll_duration_ns as f64 / total_polls as f64 / 1000.0;
+                self.tokio_worker_mean_poll_duration_us.set(mean_poll_us);
+            }
         }
 
         // Approximate busy ratio: busy_duration / process_uptime
@@ -1309,11 +1319,6 @@ impl PrometheusMetricsDriver {
                         .set(ratio.min(1.0));
                 }
             }
-        }
-
-        if total_polls > 0 {
-            let mean_poll_us = total_poll_duration_ns as f64 / total_polls as f64 / 1000.0;
-            self.tokio_worker_mean_poll_duration_us.set(mean_poll_us);
         }
     }
 

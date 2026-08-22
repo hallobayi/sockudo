@@ -5,8 +5,10 @@ icon: Container
 ---
 
 The published Sockudo image runs as a non-root user and starts the binary with
-`--config /app/config/config.json`. For production, pin a release tag, mount or generate the exact
-configuration, inject secrets separately, and set limits on the container itself.
+`--config /app/config/config.json`. The bundled file is a development example so a bare
+`docker run` can start safely with node-local drivers. For production, pin a release tag, mount or
+generate the exact configuration, inject secrets separately, and set limits on the container
+itself.
 
 ## Production-like docker run
 
