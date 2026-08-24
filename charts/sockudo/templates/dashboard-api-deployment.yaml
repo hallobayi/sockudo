@@ -12,6 +12,10 @@ spec:
   {{- if not .Values.dashboard.autoscaling.api.enabled }}
   replicas: {{ .Values.dashboard.api.replicaCount }}
   {{- end }}
+  {{- with .Values.dashboard.api.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "sockudo.dashboardSelectorLabels" (dict "root" . "component" "dashboard-api") | nindent 6 }}

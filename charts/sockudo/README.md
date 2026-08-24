@@ -37,6 +37,101 @@ there is no separate chart version to cross-reference.
 One consequence worth knowing: consecutive chart versions may be identical charts. `4.7.1`
 following `4.7.0` means a new application release, not necessarily a chart change.
 
+## Configuration file
+
+By default the chart generates a ConfigMap from the `config.*` values and mounts it at
+`/app/config/config.json`. That is fine as long as the configuration holds no secrets.
+
+It cannot hold secrets, though, for any deployment that needs per-app webhooks: those are
+expressible only in the config file, not through environment variables, so the app secret
+has to sit next to them - and a ConfigMap means plaintext in the values file, and in
+practice in the repository holding it.
+
+Point `config.existingSecret` at a Secret to supply the whole file instead:
+
+```yaml
+config:
+  existingSecret: sockudo-config
+  existingSecretKey: config.json
+```
+
+The ConfigMap is then not rendered at all, and the `config` volume is backed by the Secret.
+`config.existingSecret` and `configJson` are mutually exclusive; setting both fails the
+render.
+
+Two things to know:
+
+- The mount path is `/app/config/config.json` and Sockudo picks its parser from the file
+  extension, so the Secret's content must be JSON even though the annotated reference
+  configuration is TOML.
+- Because Helm never sees the Secret's content, the `checksum/config` pod annotation is not
+  emitted in this mode. Rotating the Secret does not restart the pods; use a reloader
+  controller or restart the Deployment yourself.
+
+The Secret is usually managed outside the chart. With External Secrets Operator:
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: sockudo-config
+spec:
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: my-secret-store
+  target:
+    name: sockudo-config
+    template:
+      engineVersion: v2
+      data:
+        config.json: "{{ .sockudoConfig }}"
+  data:
+    - secretKey: sockudoConfig
+      remoteRef:
+        key: SOCKUDO_CONFIG_FILE
+```
+
+## Rollouts and autoscaling
+
+`strategy` is passed straight through to the Deployment. Left unset, Kubernetes applies its
+default of `maxUnavailable: 25%` / `maxSurge: 25%`, which drops a quarter of the connection
+capacity mid-rollout - precisely while the clients from those pods are all reconnecting:
+
+```yaml
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 25%
+```
+
+`autoscaling.metrics` is passed straight through to the HorizontalPodAutoscaler and accepts
+any `autoscaling/v2` metric type. CPU utilisation tracks message throughput rather than
+connection headroom - a pod can sit near its connection ceiling at low CPU - so the metric
+that reflects capacity is `sockudo_connected`:
+
+```yaml
+autoscaling:
+  enabled: true
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: sockudo_connected
+        target:
+          type: AverageValue
+          averageValue: "4000"
+```
+
+Setting `autoscaling.metrics` **replaces** the CPU and memory metrics generated from
+`targetCPUUtilizationPercentage` and `targetMemoryUtilizationPercentage` rather than adding
+to them: an HPA scales on the highest recommendation from any metric, so leaving CPU in
+place would keep overriding a connection-count metric.
+
+`dashboard.api.strategy`, `dashboard.web.strategy`,
+`dashboard.autoscaling.api.metrics` and `dashboard.autoscaling.web.metrics` behave the same
+way for the dashboard deployments.
+
 ## Dashboard
 
 The dashboard is disabled by default:

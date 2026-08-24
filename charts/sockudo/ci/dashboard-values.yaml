@@ -6,6 +6,18 @@ config:
   appManagerDriver: mysql
 dashboard:
   enabled: true
+  api:
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 0
+        maxSurge: 1
+  web:
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 1
+        maxSurge: 1
   sessionSecret:
     value: ci-render-only-not-a-real-secret
   persistence:
@@ -22,6 +34,15 @@ dashboard:
   autoscaling:
     api:
       enabled: true
+      # Set on api only, so web keeps covering the generated CPU/memory Resource path.
+      metrics:
+        - type: Pods
+          pods:
+            metric:
+              name: dashboard_active_sessions
+            target:
+              type: AverageValue
+              averageValue: "50"
     web:
       enabled: true
   pdb:

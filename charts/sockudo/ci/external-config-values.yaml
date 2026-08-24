@@ -1,0 +1,25 @@
+# Exercises the three configurable surfaces no other fixture sets: the config file coming
+# from a Secret (so configmap.yaml is not rendered, the config volume is Secret-backed, and
+# the pod annotations block disappears entirely), an explicit rollout strategy, and a raw HPA
+# metric of a type the generated Resource blocks cannot express. ha-values.yaml still covers
+# the generated CPU/memory path.
+config:
+  existingSecret: sockudo-config
+  existingSecretKey: config.json
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 25%
+
+autoscaling:
+  enabled: true
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: sockudo_connected
+        target:
+          type: AverageValue
+          averageValue: "4000"

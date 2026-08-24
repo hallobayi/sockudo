@@ -1,3 +1,7 @@
+{{- if and .Values.config.existingSecret .Values.configJson }}
+{{- fail "config.existingSecret and configJson are mutually exclusive: the config file is supplied by the Secret, so remove configJson" -}}
+{{- end }}
+{{- if not .Values.config.existingSecret -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -70,3 +74,4 @@ data:
       }
     }
   {{- end }}
+{{- end }}
