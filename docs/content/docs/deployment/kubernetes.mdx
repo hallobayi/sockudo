@@ -54,6 +54,64 @@ spec:
 Note `repoURL` carries no `oci://` prefix: for a Helm chart source, ArgoCD takes the bare
 registry path and infers the OCI protocol from `chart` being set.
 
+## Configuration from a Secret
+
+By default the chart renders the `config.*` values into a ConfigMap and mounts it at
+`/app/config/config.json`. Under GitOps that ConfigMap is generated from values held in a
+repository, so it can only carry configuration that is safe to commit.
+
+Per-app webhooks are the case where it is not. Webhooks are expressible only in the config file,
+never through environment variables, so an app that has them must carry its secret in the same
+file. `defaultApp.existingSecret` does not help: it configures the environment-defined default
+app, which has no webhook support.
+
+Point `config.existingSecret` at a Secret to supply the whole file instead:
+
+```yaml
+config:
+  existingSecret: sockudo-config
+  existingSecretKey: config.json
+```
+
+The ConfigMap is then not rendered, and the `config` volume is backed by the Secret. Combining
+`config.existingSecret` with `configJson` fails the render rather than silently ignoring one of
+them.
+
+The content must be JSON: it is mounted as `config.json` and Sockudo selects its parser from the
+file extension, even though the annotated reference configuration is TOML.
+
+Helm never sees the Secret's content, so the `checksum/config` pod annotation is not emitted in
+this mode. Rotating the Secret updates the mounted file but does not restart the pods, and Sockudo
+reads its configuration only at startup - use a reloader controller or restart the Deployment.
+
+This is the shape that pairs with a secret operator. With External Secrets Operator, an
+`ExternalSecret` pulls the config file out of the backing store and the chart mounts the Secret it
+produces:
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: sockudo-config
+  namespace: sockudo
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: my-secret-store
+  target:
+    name: sockudo-config
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      data:
+        config.json: "{{ .sockudoConfig }}"
+  data:
+    - secretKey: sockudoConfig
+      remoteRef:
+        key: SOCKUDO_CONFIG_FILE
+```
+
 ## Production values example
 
 The following is a regional three-pod baseline with one immutable app sourced from a Kubernetes
@@ -251,6 +309,30 @@ CPU and memory are fallback signals, not a complete realtime scaling policy. A s
 uses active connections per pod, connection admission rejections, event-loop or fanout latency,
 adapter backlog, and reconnect rate through an external/custom metrics adapter.
 
+`autoscaling.metrics` is passed through to the HPA verbatim and accepts any `autoscaling/v2` metric
+type, so those signals can be expressed directly. `sockudo_connected` is the connection gauge:
+
+```yaml
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: sockudo_connected
+        target:
+          type: AverageValue
+          averageValue: "40000"
+```
+
+Setting it **replaces** the CPU and memory metrics generated from
+`targetCPUUtilizationPercentage` and `targetMemoryUtilizationPercentage` rather than adding to
+them. That is deliberate: an HPA acts on the highest recommendation from any metric, so leaving
+CPU in place would keep overriding a connection-based policy. Put CPU back in the list explicitly
+if you want both.
+
 Scale up early. Scale down slowly and one pod at a time. Every removed pod makes its clients
 reconnect, so an aggressive HPA can oscillate and manufacture load.
 
@@ -263,6 +345,22 @@ Set:
 - a termination grace period longer than `SHUTDOWN_GRACE_PERIOD`
 - a rollout `maxUnavailable` compatible with the PDB and remaining socket capacity
 - load-balancer deregistration or endpoint propagation time inside the drain budget
+
+`strategy` is passed through to the Deployment. Left unset, Kubernetes applies its default of
+`maxUnavailable: 25%` / `maxSurge: 25%`, which takes a quarter of the connection capacity offline
+during a rollout - exactly while the clients from the replaced pods are reconnecting. Surging
+instead keeps capacity flat:
+
+```yaml
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 25%
+```
+
+Note that a PodDisruptionBudget does not cover this. A PDB governs the eviction API - node drains
+and upgrades - not Deployment rollouts.
 
 During a rollout, watch connection count by pod. Kubernetes considers replica count, not how many
 sockets each replica owns. One terminating pod may hold a disproportionate share after a long

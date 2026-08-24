@@ -13,6 +13,9 @@ spec:
   minReplicas: {{ .Values.dashboard.autoscaling.api.minReplicas }}
   maxReplicas: {{ .Values.dashboard.autoscaling.api.maxReplicas }}
   metrics:
+    {{- if .Values.dashboard.autoscaling.api.metrics }}
+    {{- toYaml .Values.dashboard.autoscaling.api.metrics | nindent 4 }}
+    {{- else }}
     {{- if .Values.dashboard.autoscaling.api.targetCPUUtilizationPercentage }}
     - type: Resource
       resource:
@@ -28,6 +31,7 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ .Values.dashboard.autoscaling.api.targetMemoryUtilizationPercentage }}
+    {{- end }}
     {{- end }}
   {{- with .Values.dashboard.autoscaling.api.behavior }}
   behavior:
@@ -50,6 +54,9 @@ spec:
   minReplicas: {{ .Values.dashboard.autoscaling.web.minReplicas }}
   maxReplicas: {{ .Values.dashboard.autoscaling.web.maxReplicas }}
   metrics:
+    {{- if .Values.dashboard.autoscaling.web.metrics }}
+    {{- toYaml .Values.dashboard.autoscaling.web.metrics | nindent 4 }}
+    {{- else }}
     {{- if .Values.dashboard.autoscaling.web.targetCPUUtilizationPercentage }}
     - type: Resource
       resource:
@@ -65,6 +72,7 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ .Values.dashboard.autoscaling.web.targetMemoryUtilizationPercentage }}
+    {{- end }}
     {{- end }}
   {{- with .Values.dashboard.autoscaling.web.behavior }}
   behavior:

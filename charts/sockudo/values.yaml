@@ -1,5 +1,16 @@
 replicaCount: 1
 
+# -- Deployment update strategy. Left unset, Kubernetes applies its default of
+# maxUnavailable: 25% / maxSurge: 25%. For a WebSocket server, maxUnavailable: 0
+# keeps connection capacity from dipping during a rollout, so the clients being
+# disconnected always have somewhere to reconnect to.
+# strategy:
+#   type: RollingUpdate
+#   rollingUpdate:
+#     maxUnavailable: 0
+#     maxSurge: 25%
+strategy: {}
+
 image:
   repository: sockudo/sockudo
   pullPolicy: IfNotPresent
@@ -36,6 +47,19 @@ securityContext:
 
 # -- Sockudo server configuration
 config:
+  # -- Supply the whole config file from an existing Secret instead of the chart's
+  # generated ConfigMap. Required for any config containing secrets, since per-app
+  # webhooks cannot be expressed through environment variables and therefore need a
+  # config file. When set, the ConfigMap is not rendered and every other config.*
+  # value below that is only written to the ConfigMap is ignored - the config.* keys
+  # the chart also emits as environment variables still apply and still override the
+  # file. Mutually exclusive with configJson.
+  existingSecret: ""
+  # -- Key inside config.existingSecret holding the complete config file. Mounted at
+  # /app/config/config.json, so the content must be JSON: Sockudo selects its parser
+  # by file extension.
+  existingSecretKey: config.json
+
   # -- Server mode: "production" or "development"
   mode: production
   # -- Enable debug logging
@@ -263,6 +287,8 @@ dashboard:
 
   api:
     replicaCount: 1
+    # -- Deployment update strategy. See the top-level strategy value.
+    strategy: {}
     image:
       repository: sockudo/dashboard-api
       pullPolicy: IfNotPresent
@@ -334,6 +360,8 @@ dashboard:
 
   web:
     replicaCount: 1
+    # -- Deployment update strategy. See the top-level strategy value.
+    strategy: {}
     image:
       repository: sockudo/dashboard-web
       pullPolicy: IfNotPresent
@@ -406,6 +434,9 @@ dashboard:
       maxReplicas: 5
       targetCPUUtilizationPercentage: 70
       targetMemoryUtilizationPercentage: 80
+      # -- Raw HPA metrics, replacing the generated Resource metrics. See the
+      # top-level autoscaling.metrics value.
+      metrics: []
       behavior: {}
     web:
       enabled: false
@@ -413,6 +444,9 @@ dashboard:
       maxReplicas: 5
       targetCPUUtilizationPercentage: 70
       targetMemoryUtilizationPercentage: 80
+      # -- Raw HPA metrics, replacing the generated Resource metrics. See the
+      # top-level autoscaling.metrics value.
+      metrics: []
       behavior: {}
 
   pdb:
@@ -472,6 +506,23 @@ autoscaling:
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
+  # -- Raw HorizontalPodAutoscaler metrics. When set, this REPLACES the CPU and memory
+  # Resource metrics generated from the two target*UtilizationPercentage values above,
+  # rather than adding to them: an HPA scales on the highest recommendation from any
+  # metric, so leaving CPU in place would override a connection-count metric. Accepts
+  # any autoscaling/v2 metric type - Pods, Object, External - which the generated
+  # Resource blocks cannot express. For a WebSocket server, CPU tracks message
+  # throughput rather than connection headroom, and sockudo_connected is the signal
+  # that actually reflects capacity.
+  # metrics:
+  #   - type: External
+  #     external:
+  #       metric:
+  #         name: sockudo_connected
+  #       target:
+  #         type: AverageValue
+  #         averageValue: "4000"
+  metrics: []
   behavior:
     scaleDown:
       stabilizationWindowSeconds: 300
