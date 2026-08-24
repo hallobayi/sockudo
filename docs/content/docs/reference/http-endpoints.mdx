@@ -244,6 +244,7 @@ Push list endpoints use cursor pagination with `limit` and opaque `cursor`.
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/live` | None | Liveness probe. Does not perform dependency checks. |
+| `GET` | `/accept-traffic` | None | New-connection admission probe. Returns `503` while draining or shedding for memory pressure, without closing established connections. |
 | `GET` | `/up` | None | Global health probe. |
 | `GET` | `/up/{appId}` | None | App-specific health probe. |
 | `GET` | `/usage` | None, when enabled | Memory usage snapshot. Enabled by `HTTP_API_USAGE_ENABLED`. |
@@ -259,6 +260,14 @@ Pagination is anchored to interval IDs and a fixed query horizon.
 
 Disable `/usage`, `/operator/stats`, and operator aggregation stats in exposed
 production environments unless they are behind trusted ingress controls.
+
+`/accept-traffic` returns `200 ACCEPTING` when new connections may be admitted, including when the
+memory sampler is disabled or unavailable (fail-open). It returns `503 MEMORY_PRESSURE` while the
+configured RSS threshold is exceeded and `503 DRAINING` during shutdown. The
+`X-Memory-Pressure-Monitor` response header distinguishes `DISABLED`, `UNAVAILABLE`, `AVAILABLE`,
+and `SHEDDING`; `X-Memory-Limit-Source` reports `configured`, `cgroup_v2`, `cgroup_v1`, or
+`unavailable`. Keep `/up` as the dependency/readiness probe unless a load balancer can poll a
+separate admission endpoint.
 
 ## Metrics endpoint
 

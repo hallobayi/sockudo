@@ -55,6 +55,15 @@ pub async fn handle_ws_upgrade(
     if !handler.is_accepting() {
         return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
+    if handler.is_memory_pressure_shedding() {
+        handler.mark_memory_pressure_rejection();
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            [(axum::http::header::RETRY_AFTER, "1")],
+            "MEMORY_PRESSURE",
+        )
+            .into_response();
+    }
 
     // Extract Origin header if present
     let origin = headers

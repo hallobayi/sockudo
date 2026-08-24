@@ -11,6 +11,7 @@ pub mod history;
 #[doc(hidden)]
 pub mod history_conformance;
 pub mod idempotency;
+pub mod memory_pressure;
 pub mod message_envelope;
 pub mod metrics;
 pub mod namespace;

@@ -340,6 +340,40 @@ pub async fn live() -> StatusCode {
     StatusCode::OK
 }
 
+/// GET /accept-traffic
+///
+/// This admission probe is intentionally separate from `/up`: memory pressure
+/// stops new connections without declaring the process or its dependencies dead.
+pub async fn accept_traffic(
+    State(handler): State<Arc<ConnectionHandler>>,
+) -> Result<impl IntoResponse, AppError> {
+    let snapshot = handler.memory_pressure_snapshot();
+    let monitor_state = if !snapshot.enabled {
+        "DISABLED"
+    } else if !snapshot.sample_available {
+        "UNAVAILABLE"
+    } else if snapshot.shedding {
+        "SHEDDING"
+    } else {
+        "AVAILABLE"
+    };
+
+    let (status, admission_state) = if !handler.is_accepting() {
+        (StatusCode::SERVICE_UNAVAILABLE, "DRAINING")
+    } else if snapshot.shedding {
+        (StatusCode::SERVICE_UNAVAILABLE, "MEMORY_PRESSURE")
+    } else {
+        (StatusCode::OK, "ACCEPTING")
+    };
+
+    Ok(axum::http::Response::builder()
+        .status(status)
+        .header("X-Accept-Traffic", admission_state)
+        .header("X-Memory-Pressure-Monitor", monitor_state)
+        .header("X-Memory-Limit-Source", snapshot.limit_source)
+        .body(admission_state.to_string())?)
+}
+
 /// GET /up or /up/{app_id}
 #[instrument(skip(handler), fields(app_id = field::Empty))]
 pub async fn up(
@@ -493,6 +527,62 @@ mod tests {
         MemoryPresenceHistoryStore, PresenceHistoryDurableState, PresenceHistoryStreamRuntimeState,
     };
     use sonic_rs::{JsonValueTrait, Value};
+
+    #[tokio::test]
+    async fn accept_traffic_fails_open_when_memory_admission_is_disabled() {
+        let handler = Arc::new(
+            ConnectionHandlerBuilder::new(
+                Arc::new(MemoryAppManager::new()),
+                Arc::new(LocalAdapter::new()),
+                Arc::new(MemoryCacheManager::new(
+                    "test".to_string(),
+                    MemoryCacheOptions::default(),
+                )),
+                sockudo_core::options::ServerOptions::default(),
+            )
+            .build(),
+        );
+
+        let response = accept_traffic(State(handler))
+            .await
+            .unwrap()
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["X-Memory-Pressure-Monitor"], "DISABLED");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn accept_traffic_reports_memory_pressure_without_changing_readiness() {
+        let mut options = sockudo_core::options::ServerOptions::default();
+        options.http_api.accept_traffic.enabled = true;
+        options.http_api.accept_traffic.memory_limit_bytes = Some(1);
+
+        let handler = Arc::new(
+            ConnectionHandlerBuilder::new(
+                Arc::new(MemoryAppManager::new()),
+                Arc::new(LocalAdapter::new()),
+                Arc::new(MemoryCacheManager::new(
+                    "test".to_string(),
+                    MemoryCacheOptions::default(),
+                )),
+                options,
+            )
+            .build(),
+        );
+
+        assert!(
+            handler.is_accepting(),
+            "memory pressure must not change /up"
+        );
+        assert!(handler.is_memory_pressure_shedding());
+        let response = accept_traffic(State(handler))
+            .await
+            .unwrap()
+            .into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()["X-Accept-Traffic"], "MEMORY_PRESSURE");
+    }
 
     #[tokio::test]
     async fn stats_endpoint_returns_empty_totals_for_empty_server() {

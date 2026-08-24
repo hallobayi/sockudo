@@ -167,6 +167,10 @@ impl ServerOptions {
 
     pub fn validate(&self) -> Result<(), String> {
         self.ably_compat.validate()?;
+        self.http_api
+            .accept_traffic
+            .validate()
+            .map_err(|error| format!("http_api.accept_traffic: {error}"))?;
         if self.ai_transport.enabled {
             self.ai_transport.validate_deployment_matrix(
                 &self.adapter,
@@ -450,6 +454,36 @@ mod tests {
     #[test]
     fn default_health_check_timeout_leaves_probe_headroom() {
         assert_eq!(ServerOptions::default().health_check_timeout_ms, 2000);
+    }
+
+    #[test]
+    fn memory_pressure_admission_configuration_is_validated() {
+        let mut options = ServerOptions::default();
+        options.http_api.accept_traffic.memory_threshold = 1.01;
+        assert!(
+            options
+                .validate()
+                .unwrap_err()
+                .contains("http_api.accept_traffic")
+        );
+
+        options.http_api.accept_traffic.memory_threshold = 0.9;
+        options.http_api.accept_traffic.sample_interval_ms = 0;
+        assert!(
+            options
+                .validate()
+                .unwrap_err()
+                .contains("sample_interval_ms")
+        );
+
+        options.http_api.accept_traffic.sample_interval_ms = 500;
+        options.http_api.accept_traffic.memory_limit_bytes = Some(0);
+        assert!(
+            options
+                .validate()
+                .unwrap_err()
+                .contains("memory_limit_bytes")
+        );
     }
 
     #[test]

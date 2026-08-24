@@ -113,6 +113,8 @@ pub struct PrometheusMetricsDriver {
     pub(super) new_connections_total: CounterVec,
     pub(super) new_disconnections_total: CounterVec,
     pub(super) connection_errors_total: CounterVec,
+    pub(super) memory_pressure_rejections_total: CounterVec,
+    pub(super) memory_pressure_shedding: Gauge,
     pub(super) socket_bytes_received: CounterVec,
     pub(super) socket_bytes_transmitted: CounterVec,
     pub(super) ws_messages_received: CounterVec,
@@ -352,6 +354,21 @@ impl PrometheusMetricsDriver {
             ),
             &["app_id", "port", "error_type"]
         )
+        .unwrap();
+
+        let memory_pressure_rejections_total = register_counter_vec!(
+            Opts::new(
+                format!("{prefix}memory_pressure_rejections_total"),
+                "Total number of new connections rejected due to memory pressure"
+            ),
+            &["port"]
+        )
+        .unwrap();
+
+        let memory_pressure_shedding = register_gauge!(Opts::new(
+            format!("{prefix}memory_pressure_shedding"),
+            "Whether the node is currently shedding new connections due to memory pressure"
+        ))
         .unwrap();
 
         let socket_bytes_received = register_counter_vec!(
@@ -1134,6 +1151,7 @@ impl PrometheusMetricsDriver {
 
         // Reset gauge metrics to 0 on startup - they represent current state, not historical
         connected_sockets.reset();
+        memory_pressure_shedding.set(0.0);
         active_channels.reset();
         history_retained_messages.reset();
         history_retained_bytes.reset();
@@ -1174,6 +1192,8 @@ impl PrometheusMetricsDriver {
             new_connections_total,
             new_disconnections_total,
             connection_errors_total,
+            memory_pressure_rejections_total,
+            memory_pressure_shedding,
             socket_bytes_received,
             socket_bytes_transmitted,
             ws_messages_received,
@@ -1330,18 +1350,22 @@ impl PrometheusMetricsDriver {
             // Read /proc/self/statm for memory info (in pages)
             if let Ok(statm) = std::fs::read_to_string("/proc/self/statm") {
                 let parts: Vec<&str> = statm.split_whitespace().collect();
-                if parts.len() >= 2 {
+                if !parts.is_empty() {
                     let page_size = 4096_u64; // Standard page size on Linux
                     // First value is total program size (virtual memory) in pages
                     if let Ok(vsize_pages) = parts[0].parse::<u64>() {
                         self.process_virtual_memory_bytes
                             .set((vsize_pages * page_size) as f64);
                     }
-                    // Second value is resident set size in pages
-                    if let Ok(rss_pages) = parts[1].parse::<u64>() {
-                        self.process_resident_memory_bytes
-                            .set((rss_pages * page_size) as f64);
-                    }
+                }
+            }
+
+            match sockudo_core::memory_pressure::process_resident_memory_bytes() {
+                Ok(resident_memory_bytes) => self
+                    .process_resident_memory_bytes
+                    .set(resident_memory_bytes as f64),
+                Err(error) => {
+                    tracing::debug!(error = %error, "process resident memory sampling failed");
                 }
             }
 

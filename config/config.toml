@@ -443,6 +443,15 @@ v2_ungraceful_timeout_seconds = 15
 [http_api]
 request_limit_in_mb = 10
 
+# Optional Linux memory-pressure admission control. This rejects only new
+# WebSocket connections; established connections and /up remain unaffected.
+[http_api.accept_traffic]
+enabled = false
+memory_threshold = 0.90
+# Omit memory_limit_bytes to discover the cgroup v2/v1 limit automatically.
+# memory_limit_bytes = 2147483648
+sample_interval_ms = 500
+
 [webhooks]
 request_timeout_ms = 10000
 
