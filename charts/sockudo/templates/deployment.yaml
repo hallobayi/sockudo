@@ -106,6 +106,16 @@ spec:
             # HTTP API
             - name: HTTP_API_USAGE_ENABLED
               value: {{ .Values.config.httpApi.usageEnabled | quote }}
+            - name: HTTP_API_ACCEPT_TRAFFIC_ENABLED
+              value: {{ .Values.config.httpApi.acceptTraffic.enabled | quote }}
+            - name: HTTP_API_ACCEPT_TRAFFIC_MEMORY_THRESHOLD
+              value: {{ .Values.config.httpApi.acceptTraffic.memoryThreshold | quote }}
+            {{- with .Values.config.httpApi.acceptTraffic.memoryLimitBytes }}
+            - name: HTTP_API_ACCEPT_TRAFFIC_MEMORY_LIMIT_BYTES
+              value: {{ . | quote }}
+            {{- end }}
+            - name: HTTP_API_ACCEPT_TRAFFIC_SAMPLE_INTERVAL_MS
+              value: {{ .Values.config.httpApi.acceptTraffic.sampleIntervalMs | quote }}
             # Rate limiter
             - name: RATE_LIMITER_ENABLED
               value: {{ .Values.config.rateLimiter.enabled | quote }}

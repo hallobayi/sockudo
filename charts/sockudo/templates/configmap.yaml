@@ -33,7 +33,13 @@ data:
         "driver": {{ .Values.config.queueDriver | quote }}
       },
       "http_api": {
-        "usage_enabled": {{ .Values.config.httpApi.usageEnabled }}
+        "usage_enabled": {{ .Values.config.httpApi.usageEnabled }},
+        "accept_traffic": {
+          "enabled": {{ .Values.config.httpApi.acceptTraffic.enabled }},
+          "memory_threshold": {{ .Values.config.httpApi.acceptTraffic.memoryThreshold }},
+          "memory_limit_bytes": {{ .Values.config.httpApi.acceptTraffic.memoryLimitBytes | default "null" }},
+          "sample_interval_ms": {{ .Values.config.httpApi.acceptTraffic.sampleIntervalMs | int64 }}
+        }
       },
       "rate_limiter": {
         "enabled": {{ .Values.config.rateLimiter.enabled }},

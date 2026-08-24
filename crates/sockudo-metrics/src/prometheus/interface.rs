@@ -42,6 +42,17 @@ impl MetricsInterface for PrometheusMetricsDriver {
         debug!(app_id, error_type, "metrics: connection error");
     }
 
+    fn mark_memory_pressure_rejection(&self) {
+        self.memory_pressure_rejections_total
+            .with_label_values(&[&self.port.to_string()])
+            .inc();
+    }
+
+    fn update_memory_pressure_shedding(&self, shedding: bool) {
+        self.memory_pressure_shedding
+            .set(if shedding { 1.0 } else { 0.0 });
+    }
+
     fn mark_rate_limit_check(&self, app_id: &str, limiter_type: &str) {
         self.mark_rate_limit_check_with_context(app_id, limiter_type, "unknown");
     }

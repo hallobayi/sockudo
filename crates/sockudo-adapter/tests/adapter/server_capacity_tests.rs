@@ -24,6 +24,7 @@ use tokio::net::{TcpListener, TcpStream};
 struct CountingMetrics {
     new_connections: AtomicUsize,
     disconnections: AtomicUsize,
+    memory_pressure_rejections: AtomicUsize,
 }
 
 impl CountingMetrics {
@@ -31,11 +32,16 @@ impl CountingMetrics {
         Self {
             new_connections: AtomicUsize::new(0),
             disconnections: AtomicUsize::new(0),
+            memory_pressure_rejections: AtomicUsize::new(0),
         }
     }
 
     fn new_connections(&self) -> usize {
         self.new_connections.load(Ordering::SeqCst)
+    }
+
+    fn memory_pressure_rejections(&self) -> usize {
+        self.memory_pressure_rejections.load(Ordering::SeqCst)
     }
 }
 
@@ -54,6 +60,10 @@ impl MetricsInterface for CountingMetrics {
     }
 
     fn mark_connection_error(&self, _: &str, _: &str) {}
+    fn mark_memory_pressure_rejection(&self) {
+        self.memory_pressure_rejections
+            .fetch_add(1, Ordering::SeqCst);
+    }
     fn mark_rate_limit_check(&self, _: &str, _: &str) {}
     fn mark_rate_limit_check_with_context(&self, _: &str, _: &str, _: &str) {}
     fn mark_rate_limit_triggered(&self, _: &str, _: &str) {}
@@ -275,6 +285,71 @@ async fn server_max_connections_rejects_over_capacity() {
         metrics.new_connections(),
         0,
         "mark_new_connection must NOT be called on capacity rejection"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn memory_pressure_rejects_new_connection_without_marking_it_connected() {
+    let app_manager = Arc::new(MemoryAppManager::new());
+    app_manager.create_app(make_app(0)).await.unwrap();
+
+    let adapter = Arc::new(LocalAdapter::new());
+    adapter.init().await;
+    let metrics = Arc::new(CountingMetrics::new());
+    let mut options = ServerOptions::default();
+    options.http_api.accept_traffic.enabled = true;
+    options.http_api.accept_traffic.memory_limit_bytes = Some(1);
+
+    let handler = ConnectionHandler::builder(
+        app_manager.clone() as Arc<dyn AppManager + Send + Sync>,
+        adapter.clone() as Arc<dyn ConnectionManager + Send + Sync>,
+        Arc::new(NullCacheManager),
+        options,
+    )
+    .local_adapter(adapter.clone())
+    .metrics(metrics.clone())
+    .build();
+
+    assert!(handler.is_memory_pressure_shedding());
+    let established_socket_id = SocketId::new();
+    let (established_writer, _established_client) = make_ws_pair().await;
+    adapter
+        .add_socket(
+            established_socket_id,
+            established_writer,
+            APP_ID,
+            app_manager as Arc<dyn AppManager + Send + Sync>,
+            WebSocketBufferConfig::default(),
+            ProtocolVersion::V1,
+            WireFormat::Json,
+            true,
+            sockudo_protocol::AppendMode::Delta,
+        )
+        .await
+        .unwrap();
+
+    let (server_ws, _client) = make_full_ws_pair().await;
+    let result = handler
+        .handle_socket(
+            server_ws,
+            APP_KEY.to_string(),
+            None,
+            ProtocolVersion::V1,
+            WireFormat::Json,
+            true,
+            sockudo_protocol::AppendMode::Delta,
+            None,
+        )
+        .await;
+
+    assert!(matches!(result, Err(Error::OverCapacity)));
+    assert_eq!(metrics.memory_pressure_rejections(), 1);
+    assert_eq!(metrics.new_connections(), 0);
+    assert_eq!(
+        adapter.get_total_sockets_count(),
+        1,
+        "memory-pressure admission must leave established connections open"
     );
 }
 

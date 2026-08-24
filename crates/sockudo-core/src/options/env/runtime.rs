@@ -79,6 +79,23 @@ pub(super) fn apply(options: &mut ServerOptions) -> Result<(), Box<dyn std::erro
     // --- HTTP API ---
     options.http_api.usage_enabled =
         parse_bool_env("HTTP_API_USAGE_ENABLED", options.http_api.usage_enabled);
+    options.http_api.accept_traffic.enabled = parse_bool_env(
+        "HTTP_API_ACCEPT_TRAFFIC_ENABLED",
+        options.http_api.accept_traffic.enabled,
+    );
+    options.http_api.accept_traffic.memory_threshold = parse_env::<f64>(
+        "HTTP_API_ACCEPT_TRAFFIC_MEMORY_THRESHOLD",
+        options.http_api.accept_traffic.memory_threshold,
+    );
+    if let Some(limit_bytes) =
+        parse_env_optional::<u64>("HTTP_API_ACCEPT_TRAFFIC_MEMORY_LIMIT_BYTES")
+    {
+        options.http_api.accept_traffic.memory_limit_bytes = Some(limit_bytes);
+    }
+    options.http_api.accept_traffic.sample_interval_ms = parse_env::<u64>(
+        "HTTP_API_ACCEPT_TRAFFIC_SAMPLE_INTERVAL_MS",
+        options.http_api.accept_traffic.sample_interval_ms,
+    );
 
     // --- Rate Limiter ---
     options.rate_limiter.enabled =

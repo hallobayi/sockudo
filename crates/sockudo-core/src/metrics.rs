@@ -17,6 +17,12 @@ pub trait MetricsInterface: Send + Sync {
     /// Handle a connection error
     fn mark_connection_error(&self, app_id: &str, error_type: &str);
 
+    /// Track a new connection rejected by memory-pressure admission control.
+    fn mark_memory_pressure_rejection(&self) {}
+
+    /// Update whether the node is currently shedding new connections.
+    fn update_memory_pressure_shedding(&self, _shedding: bool) {}
+
     /// Track a rate limit check
     fn mark_rate_limit_check(&self, app_id: &str, limiter_type: &str);
 

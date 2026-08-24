@@ -46,6 +46,30 @@ For endpoint availability details see
 For capacity and operational metrics see
 [Capacity planning — API pod topology](/docs/deployment/capacity-planning#api-pod-topology).
 
+## Memory-pressure connection admission
+
+Memory-pressure admission control is opt-in under `[http_api.accept_traffic]`:
+
+```toml
+[http_api.accept_traffic]
+enabled = true
+memory_threshold = 0.90
+# memory_limit_bytes = 2147483648 # optional; otherwise discover the cgroup limit
+sample_interval_ms = 500
+```
+
+On Linux, Sockudo samples its process RSS on `sample_interval_ms`, independently of Prometheus
+scrapes. It compares RSS with `memory_limit_bytes` when configured, otherwise with the finite cgroup
+v2 `memory.max` or cgroup v1 `memory.limit_in_bytes` value. At or above `memory_threshold`, native
+and Ably WebSocket upgrades return `503`, and the post-upgrade admission gate returns protocol close
+code `4100` if pressure changes during the upgrade. Existing connections remain open.
+
+The sampler fails open when RSS or a finite limit is unavailable, including on non-Linux systems.
+`GET /accept-traffic` exposes the admission decision for a load balancer; `/up` deliberately remains
+a dependency/readiness check and does not fail because of memory pressure. Use
+`sockudo_memory_pressure_shedding` and `sockudo_memory_pressure_rejections_total` to alert on the
+current state and rejected connection count.
+
 ## App manager
 
 | Section | Purpose |

@@ -1,6 +1,6 @@
 use super::SockudoServer;
 use crate::http_handler::{
-    append_message, batch_events, channel, channel_history, channel_history_purge,
+    accept_traffic, append_message, batch_events, channel, channel_history, channel_history_purge,
     channel_history_reset, channel_history_state, channel_message, channel_message_annotations,
     channel_message_versions, channel_presence_history, channel_presence_history_reset,
     channel_presence_history_snapshot, channel_presence_history_state, channel_users, channels,
@@ -587,6 +587,7 @@ impl SockudoServer {
 
         let mut router = router
             .merge(api_router)
+            .route("/accept-traffic", get(accept_traffic))
             .route("/up", get(up))
             .route("/up/{appId}", get(up))
             .route("/live", get(live));

@@ -94,6 +94,15 @@ config:
   # -- HTTP API settings
   httpApi:
     usageEnabled: true
+    acceptTraffic:
+      # -- Reject only new WebSocket connections when process RSS reaches the threshold
+      enabled: false
+      # -- Fraction of the cgroup or explicit memory limit that closes admission
+      memoryThreshold: 0.9
+      # -- Explicit byte limit; null discovers the Linux cgroup limit
+      memoryLimitBytes: null
+      # -- Memory sampling cadence, independent of Prometheus scraping
+      sampleIntervalMs: 500
 
   # -- Rate limiter settings
   rateLimiter:

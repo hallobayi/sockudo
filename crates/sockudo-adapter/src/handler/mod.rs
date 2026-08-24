@@ -36,6 +36,9 @@ use sockudo_core::app::AppManager;
 use sockudo_core::cache::CacheManager;
 use sockudo_core::error::{Error, Result};
 use sockudo_core::history::{HistoryStore, NoopHistoryStore};
+use sockudo_core::memory_pressure::{
+    MemoryPressureMonitor, MemoryPressureObserver, MemoryPressureSnapshot,
+};
 use sockudo_core::message_envelope::MessageEnvelope;
 use sockudo_core::metrics::MetricsInterface;
 use sockudo_core::options::ServerOptions;
@@ -187,6 +190,8 @@ pub struct ConnectionHandler {
     /// Shared with the server runtime. Flipped to false on shutdown so the handler
     /// stops accepting new connections and `/up` reports draining.
     running: Arc<AtomicBool>,
+    /// Independent sampler used only for new-connection admission.
+    memory_pressure_monitor: Arc<MemoryPressureMonitor>,
 }
 
 /// Builder for constructing a `ConnectionHandler` without feature-gated function parameters.
@@ -363,6 +368,16 @@ impl ConnectionHandlerBuilder {
                 .set_realtime_egress_tap(Arc::clone(tap));
         }
 
+        let memory_pressure_observer = self.metrics.as_ref().map(|metrics| {
+            let metrics = Arc::clone(metrics);
+            Arc::new(move |shedding| metrics.update_memory_pressure_shedding(shedding))
+                as MemoryPressureObserver
+        });
+        let memory_pressure_monitor = MemoryPressureMonitor::new(
+            &self.server_options.http_api.accept_traffic,
+            memory_pressure_observer,
+        );
+
         let handler = ConnectionHandler {
             app_manager: self.app_manager,
             connection_manager: self.connection_manager,
@@ -416,7 +431,10 @@ impl ConnectionHandlerBuilder {
             running: self
                 .running
                 .unwrap_or_else(|| Arc::new(AtomicBool::new(true))),
+            memory_pressure_monitor,
         };
+
+        handler.memory_pressure_monitor.start();
 
         #[cfg(feature = "ai-transport")]
         if handler.server_options.ai_transport.enabled {
@@ -547,6 +565,23 @@ impl ConnectionHandler {
     /// shutdown has flipped the shared running flag, signalling drain.
     pub fn is_accepting(&self) -> bool {
         self.running.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Whether memory pressure is currently closing only new-connection admission.
+    pub fn is_memory_pressure_shedding(&self) -> bool {
+        self.memory_pressure_monitor.is_shedding()
+    }
+
+    /// Latest memory-pressure state for operational endpoints.
+    pub fn memory_pressure_snapshot(&self) -> MemoryPressureSnapshot {
+        self.memory_pressure_monitor.snapshot()
+    }
+
+    /// Record one connection rejected by the memory-pressure admission gate.
+    pub fn mark_memory_pressure_rejection(&self) {
+        if let Some(metrics) = self.metrics.as_ref() {
+            metrics.mark_memory_pressure_rejection();
+        }
     }
 
     /// Get a reference to the presence manager
@@ -802,6 +837,13 @@ impl ConnectionHandler {
         app_config: &App,
         wire_options: SocketWireOptions,
     ) -> Result<()> {
+        // Memory pressure closes admission only; established sockets remain untouched.
+        if self.is_memory_pressure_shedding() {
+            self.mark_memory_pressure_rejection();
+            Self::send_error_frame(&mut socket_tx, &Error::OverCapacity).await;
+            return Err(Error::OverCapacity);
+        }
+
         // Per-pod capacity check (across all apps on this node)
         if self.server_options.max_connections > 0 {
             let node_count = if let Some(ref la) = self.local_adapter {

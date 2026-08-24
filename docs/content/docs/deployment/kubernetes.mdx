@@ -260,6 +260,7 @@ Use different endpoints for different decisions:
 | Startup | `/live` | The process has started. |
 | Liveness | `/live` | The process runtime is alive. |
 | Readiness | `/up` or `/up/<app-id>` | Required apps and shared dependencies are available. |
+| New-connection admission | `/accept-traffic` | The pod is not draining or shedding new connections under memory pressure. |
 
 Do not use dependency-aware `/up` as liveness. Restarting every pod because Redis is slow creates a
 reconnect storm and does not repair Redis.
@@ -278,6 +279,27 @@ Persistent connections do not map cleanly onto CPU-only autoscaling:
 Set `SOCKUDO_MAX_CONNECTIONS` on every pod so a single replica cannot absorb more connections than
 its measured memory and file-descriptor budget. Keep minimum replicas high enough for the peak
 quiet-socket count even when CPU is low.
+
+For a second guard based on actual memory use, enable the chart's memory-pressure admission control:
+
+```yaml
+config:
+  httpApi:
+    acceptTraffic:
+      enabled: true
+      memoryThreshold: 0.9
+      sampleIntervalMs: 500
+```
+
+With `memoryLimitBytes: null` (the default), Sockudo discovers the pod's finite cgroup memory limit.
+When process RSS reaches the configured fraction, the pod rejects only new native and Ably
+WebSocket connections with `503`/retry guidance while established sessions continue. It resumes
+admission after a later sample falls below the threshold. The sampler is independent of metrics
+scrapes and fails open if Linux RSS or cgroup data is unavailable.
+
+Keep `/up` as Kubernetes readiness so dependency failures remain visible. If the ingress or external
+load balancer supports a separate backend-admission or network-watcher probe, point that probe at
+`/accept-traffic`. Direct admission enforcement remains active even without such a probe.
 
 CPU limits can throttle a pod during the exact reconnect or fanout burst it needs to process.
 Requests plus a memory limit are a reasonable starting point on a dedicated node pool. Add a CPU

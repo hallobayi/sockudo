@@ -84,6 +84,15 @@ pub async fn handle_ably_realtime_upgrade(
     if !handler.is_accepting() {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
+    if handler.is_memory_pressure_shedding() {
+        handler.mark_memory_pressure_rejection();
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(axum::http::header::RETRY_AFTER, "1")],
+            "MEMORY_PRESSURE",
+        )
+            .into_response();
+    }
     let format = match parse_ably_format(params.format.as_deref()) {
         Ok(format) => format,
         Err(message) => return ably_error_response(StatusCode::BAD_REQUEST, 40000, message),

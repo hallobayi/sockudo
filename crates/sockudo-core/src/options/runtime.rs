@@ -48,7 +48,14 @@ pub struct HttpApiConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AcceptTraffic {
+    /// Enable memory-pressure admission control for new WebSocket connections.
+    pub enabled: bool,
+    /// Fraction of the effective memory limit at which admission is closed.
     pub memory_threshold: f64,
+    /// Optional explicit memory limit. When unset, Linux cgroup limits are discovered.
+    pub memory_limit_bytes: Option<u64>,
+    /// Interval used by the admission sampler, independent of metrics scraping.
+    pub sample_interval_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -433,8 +440,29 @@ impl Default for HttpApiConfig {
 impl Default for AcceptTraffic {
     fn default() -> Self {
         Self {
+            enabled: false,
             memory_threshold: 0.90,
+            memory_limit_bytes: None,
+            sample_interval_ms: 500,
         }
+    }
+}
+
+impl AcceptTraffic {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.memory_threshold.is_finite()
+            || self.memory_threshold <= 0.0
+            || self.memory_threshold > 1.0
+        {
+            return Err("memory_threshold must be greater than 0 and at most 1".to_string());
+        }
+        if self.memory_limit_bytes == Some(0) {
+            return Err("memory_limit_bytes must be greater than 0 when set".to_string());
+        }
+        if self.sample_interval_ms == 0 {
+            return Err("sample_interval_ms must be greater than 0".to_string());
+        }
+        Ok(())
     }
 }
 

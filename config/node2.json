@@ -216,7 +216,9 @@
   "http_api": {
     "request_limit_in_mb": 10,
     "accept_traffic": {
-      "memory_threshold": 0.9
+      "enabled": false,
+      "memory_threshold": 0.9,
+      "sample_interval_ms": 500
     }
   },
   "webhooks": {
