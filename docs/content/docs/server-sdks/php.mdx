@@ -15,14 +15,16 @@ composer require sockudo/sockudo-php-server:^2.0
 ```php
 use Sockudo\Sockudo;
 
-$sockudo = new Sockudo([
-    'app_id' => 'app-id',
-    'key' => 'app-key',
-    'secret' => 'app-secret',
-    'host' => '127.0.0.1',
-    'port' => 6001,
-    'useTLS' => false,
-]);
+$sockudo = new Sockudo(
+    'app-key',
+    'app-secret',
+    'app-id',
+    [
+        'host' => '127.0.0.1',
+        'port' => 6001,
+        'useTLS' => false,
+    ],
+);
 ```
 
 Create the client once in your framework service container and reuse it. The
@@ -45,7 +47,13 @@ $http = new GuzzleHttp\Client([
     'connect_timeout' => 2.0,
 ]);
 
-$sockudo = new Sockudo($config, $http);
+$sockudo = new Sockudo(
+    'app-key',
+    'app-secret',
+    'app-id',
+    ['host' => '127.0.0.1', 'port' => 6001, 'useTLS' => false],
+    $http,
+);
 ```
 
 ## Publish
@@ -138,6 +146,18 @@ Treat application state as an operational snapshot. Keep history pages bounded
 and pass cursors back unchanged.
 
 ## Laravel broadcasting
+
+For a first-class `sockudo` broadcasting connection, auto-discovered service
+provider, configuration check, and native SDK facade, install the
+[Laravel integration](/docs/server-sdks/laravel):
+
+```bash
+composer require sockudo/laravel
+php artisan sockudo:install
+```
+
+The Pusher-compatible connection below remains supported for existing
+applications that do not want the Laravel integration package:
 
 ```php
 'pusher' => [

@@ -22,6 +22,7 @@ expects `Package.swift` at the repository root.
 | `io.sockudo:sockudo-http-java` | `server-sdks/sockudo-http-java` |
 | `sockudo` | `server-sdks/sockudo-http-node` |
 | `sockudo/sockudo-php-server` | `server-sdks/sockudo-http-php` |
+| `sockudo/laravel` | `server-sdks/sockudo-laravel` |
 | `sockudo-http-python` | `server-sdks/sockudo-http-python` |
 | `sockudo` | `server-sdks/sockudo-http-ruby` |
 | `sockudo-http` | `server-sdks/sockudo-http-rust` |

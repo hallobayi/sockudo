@@ -1,0 +1,160 @@
+---
+title: Laravel
+description: Use Sockudo as a first-class Laravel broadcaster with Echo-compatible auth and access to native history, mutable-message, annotation, and push APIs.
+icon: RadioTower
+---
+
+The official Laravel integration registers a `sockudo` broadcasting connection
+backed by the PHP server SDK. Existing Laravel broadcast events keep their
+normal semantics, while trusted backend code can use Sockudo-native APIs from
+the service container or facade.
+
+## Install
+
+```bash
+composer require sockudo/laravel
+php artisan sockudo:install
+```
+
+The service provider is auto-discovered. Configure credentials through your
+environment or secret manager:
+
+```bash
+BROADCAST_CONNECTION=sockudo
+
+SOCKUDO_APP_ID=app-id
+SOCKUDO_APP_KEY=app-key
+SOCKUDO_APP_SECRET=app-secret
+SOCKUDO_HOST=127.0.0.1
+SOCKUDO_PORT=6001
+SOCKUDO_SCHEME=http
+```
+
+Use `https` when the signed HTTP API crosses an untrusted network. Confirm the
+configuration and API connectivity without exposing credentials:
+
+```bash
+php artisan sockudo:check
+```
+
+Use `php artisan sockudo:check --config-only` when Sockudo is intentionally
+unreachable during image builds.
+
+The install command warns when Laravel's `routes/channels.php` broadcasting
+scaffold is absent. Install Laravel broadcasting routes before using private or
+presence channels; the Sockudo package supplies the backend connection but
+does not silently rewrite application route authorization.
+
+## Broadcast events
+
+Laravel's existing event contracts work unchanged:
+
+```php
+use Illuminate\Broadcasting\PrivateChannel;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+
+final class OrderUpdated implements ShouldBroadcast
+{
+    public function __construct(public readonly string $orderId) {}
+
+    public function broadcastOn(): PrivateChannel
+    {
+        return new PrivateChannel("orders.{$this->orderId}");
+    }
+}
+```
+
+The driver supports queued broadcasting, `ShouldBroadcastNow`, `toOthers()`,
+public channels, private channels, presence channels, encrypted private
+channels, and user authentication. Define authorization callbacks in
+`routes/channels.php` as usual:
+
+```php
+use Illuminate\Support\Facades\Broadcast;
+
+Broadcast::channel('orders.{order}', function ($user, $order) {
+    return $user->can('view', $order);
+});
+```
+
+Signing proves that Laravel approved a subscription; your channel callback is
+still responsible for tenant and resource authorization.
+
+## Connect Laravel Echo
+
+Laravel Echo uses the Pusher connector for Sockudo Protocol V1:
+
+```js
+import Echo from 'laravel-echo';
+import Pusher from 'pusher-js';
+
+window.Pusher = Pusher;
+
+window.Echo = new Echo({
+  broadcaster: 'pusher',
+  key: import.meta.env.VITE_SOCKUDO_APP_KEY,
+  wsHost: import.meta.env.VITE_SOCKUDO_HOST,
+  wsPort: Number(import.meta.env.VITE_SOCKUDO_PORT ?? 6001),
+  wssPort: Number(import.meta.env.VITE_SOCKUDO_PORT ?? 443),
+  forceTLS: (import.meta.env.VITE_SOCKUDO_SCHEME ?? 'https') === 'https',
+  enabledTransports: ['ws', 'wss'],
+});
+```
+
+Echo sends private and presence authorization requests to Laravel's standard
+`/broadcasting/auth` endpoint. Never expose `SOCKUDO_APP_SECRET` to JavaScript.
+
+Protocol V2 recovery, rewind, filters, deltas, and mutable-message projections
+require a Sockudo-native realtime client rather than Laravel Echo.
+
+## Native APIs
+
+The facade proxies calls to the configured PHP server SDK client:
+
+```php
+use Sockudo\Laravel\Facades\Sockudo;
+
+$history = Sockudo::getChannelHistory('orders', ['limit' => 50]);
+
+Sockudo::updateMessage('orders', $messageSerial, [
+    'data' => ['status' => 'paid'],
+]);
+
+Sockudo::publishAnnotation('orders', $messageSerial, [
+    'type' => 'reaction',
+    'name' => 'confirmed',
+]);
+
+$publish = Sockudo::publishPush([
+    'recipients' => [['type' => 'channel', 'channel' => 'orders']],
+    'payload' => ['title' => 'Order updated'],
+    'idempotency_key' => 'order-updated:ord-123:v4',
+]);
+```
+
+Inject `Sockudo\SockudoInterface` when constructor injection is preferable. The
+binding resolves the connection named by `SOCKUDO_CONNECTION`, which defaults
+to `sockudo`.
+
+## Multiple Sockudo apps
+
+Define additional `driver => sockudo` entries in
+`config/broadcasting.php`, then select one explicitly:
+
+```php
+$client = Sockudo::connection('sockudo-eu');
+$client->trigger('orders', 'order.updated', ['id' => 'ord-123']);
+```
+
+Each connection has its own credentials, host, TLS options, and HTTP client
+settings. Keep all secrets out of committed configuration and logs.
+
+## Deployment notes
+
+- Run broadcasts on Laravel queues when request latency should not depend on
+  the realtime API.
+- Keep the SDK timeout below the queue-job timeout.
+- Restart long-lived queue workers after changing cached configuration.
+- Use stable, business-derived idempotency keys for retryable native publishes.
+- Test public, private, presence, encrypted, `toOthers()`, and queued flows
+  before switching production traffic.
