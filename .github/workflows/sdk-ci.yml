@@ -8,6 +8,7 @@ on:
       - ".github/workflows/sdk-ci.yml"
       - ".github/workflows/sdk-release.yml"
       - ".github/workflows/mirror-php-sdk.yml"
+      - ".github/workflows/mirror-laravel-sdk.yml"
       - ".github/workflows/mirror-swift-sdks.yml"
       - "client-sdks/**"
       - "server-sdks/**"
@@ -17,6 +18,7 @@ on:
       - ".github/workflows/sdk-ci.yml"
       - ".github/workflows/sdk-release.yml"
       - ".github/workflows/mirror-php-sdk.yml"
+      - ".github/workflows/mirror-laravel-sdk.yml"
       - ".github/workflows/mirror-swift-sdks.yml"
       - "client-sdks/**"
       - "server-sdks/**"
@@ -63,6 +65,7 @@ jobs:
           .github/workflows/sdk-ci.yml
           .github/workflows/sdk-release.yml
           .github/workflows/mirror-php-sdk.yml
+          .github/workflows/mirror-laravel-sdk.yml
           .github/workflows/mirror-swift-sdks.yml
 
   dependency-review:
@@ -398,6 +401,47 @@ jobs:
           composer install --no-interaction --prefer-dist
           vendor/bin/php-cs-fixer fix --dry-run --diff --using-cache=no
           vendor/bin/phplint src tests
+          vendor/bin/phpunit
+
+  laravel-server-sdk:
+    name: Laravel SDK / Laravel ${{ matrix.laravel }} / PHP ${{ matrix.php }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - laravel: "12"
+            php: "8.2"
+            testbench: "^10.0"
+            phpunit: "^11.0"
+          - laravel: "13"
+            php: "8.3"
+            testbench: "^11.0"
+            phpunit: "^12.0"
+    defaults:
+      run:
+        shell: bash
+        working-directory: server-sdks/sockudo-laravel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+          extensions: curl, json, sodium
+
+      - name: Verify Laravel package
+        run: |
+          composer validate --strict --no-check-lock
+          composer update --no-interaction --prefer-dist \
+            --with "orchestra/testbench:${{ matrix.testbench }}" \
+            --with "phpunit/phpunit:${{ matrix.phpunit }}"
+          vendor/bin/php-cs-fixer fix --dry-run --diff --using-cache=no
+          vendor/bin/phplint src config tests
           vendor/bin/phpunit
 
   ruby-server-sdk:

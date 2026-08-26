@@ -18,6 +18,7 @@ release built from it. Do not create any release tag until that exact commit is 
 | Node server SDK `sockudo` | 2.2.0 | `server-node-v2.2.0` |
 | `sockudo-http-python` | 2.2.0 | `server-python-v2.2.0` |
 | `sockudo/sockudo-php-server` | 2.2.0 | `server-php-v2.2.0` |
+| `sockudo/laravel` | 1.0.0 | `server-laravel-v1.0.0` |
 | Ruby server SDK `sockudo` | 2.2.0 | `server-ruby-v2.2.0` |
 | Go server SDK v2 | 2.2.0 | `server-sdks/sockudo-http-go/v2.2.0` |
 | `sockudo-http` Rust server SDK | 2.2.0 | `server-rust-v2.2.0` |
@@ -26,7 +27,8 @@ release built from it. Do not create any release tag until that exact commit is 
 | Swift server SDK `Sockudo` | 2.2.0 | `server-swift-v2.2.0` |
 
 AI Transport 3.0.0 and the Swift client 3.0.0 carry real breaking changes documented in their
-package changelogs. The other SDK changes are additive and remain on the 2.x line. The Go module
+package changelogs. The Laravel integration is a new 1.0.0 package. The other SDK changes are
+additive and remain on the 2.x line. The Go module
 stays on `/v2`; moving it to 3.0.0 would require a breaking `/v3` import path.
 
 ## Required Gates
@@ -59,7 +61,7 @@ workflow package and publish the full set in dependency order.
 3. Run released-binary compatibility verification against `v5.0.0` and retain the reports.
 4. Publish `@sockudo/client` 2.2.0 before `@sockudo/ai-transport` 3.0.0.
 5. Create the remaining client tags from the same SHA.
-6. Create the nine server SDK tags from the same SHA. The PHP and Swift mirror workflows must
+6. Create the ten server SDK tags from the same SHA. The PHP, Laravel, and Swift mirror workflows must
    finish before checking Packagist or SwiftPM availability.
 7. Verify registry metadata, provenance, install snippets, mirrored tags, and package contents for
    every entry in the matrix.
@@ -81,6 +83,6 @@ preceding release has completed; do not publish the whole train with an unreview
 - [ ] pull and smoke-test both `ghcr.io/sockudo/sockudo:5.0.0` and `sockudo/sockudo:5.0.0`
 - [ ] verify Linux GNU/musl archives and detached SHA-256 files for x86_64 and ARM64
 - [ ] install each SDK from its public registry or SwiftPM mirror at the matrix version
-- [ ] confirm the PHP mirror exposes `v2.2.0` and both Swift mirrors expose their expected tags
+- [ ] confirm the PHP mirror exposes `v2.2.0`, the Laravel mirror exposes `v1.0.0`, and both Swift mirrors expose their expected tags
 - [ ] mark the published-artifact and released-binary items green in the compatibility scorecard
 - [ ] announce breaking AI Transport and Swift actor-isolation migrations beside the release notes

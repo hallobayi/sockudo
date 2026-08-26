@@ -45,6 +45,7 @@ or signing credentials:
 | `MAVEN_GPG_PASSPHRASE` | Maven Central | signing key passphrase |
 | `CRATES_IO_TOKEN` | crates.io | fallback token used only when trusted publishing is not configured |
 | `PHP_SDK_MIRROR_TOKEN` | Packagist/PHP mirror | fine-grained PAT or GitHub App token with contents write access to `sockudo/sockudo-http-php` |
+| `LARAVEL_SDK_MIRROR_TOKEN` | Packagist/Laravel mirror | fine-grained PAT or GitHub App token with contents write access to `sockudo/sockudo-laravel` |
 | `SWIFT_SDK_MIRROR_TOKEN` | SwiftPM mirrors | fine-grained PAT or GitHub App token with contents and workflows write access to `sockudo/sockudo-swift` and `sockudo/sockudo-http-swift` |
 
 ## Browser Setup Checklist
@@ -146,31 +147,42 @@ configured yet, it falls back to `CRATES_IO_TOKEN`.
 
 ### Packagist
 
-Package: `sockudo/sockudo-php-server`
+Packages: `sockudo/sockudo-php-server`, `sockudo/laravel`
 
 Packagist publishes from VCS tags and repository hooks, not from an uploaded artifact. Public
 Packagist.org does not publish packages from a subdirectory, so the monorepo is the source of truth
 and `.github/workflows/mirror-php-sdk.yml` mirrors `server-sdks/sockudo-http-php` to the root of the
 standalone `sockudo/sockudo-http-php` repository.
 
+The same rule applies to the Laravel integration:
+`.github/workflows/mirror-laravel-sdk.yml` mirrors
+`server-sdks/sockudo-laravel` to the root of `sockudo/sockudo-laravel`.
+
 Submit this repository URL to Packagist:
 
 ```text
 https://github.com/sockudo/sockudo-http-php
+https://github.com/sockudo/sockudo-laravel
 ```
 
 Stable Packagist versions come from Composer-compatible mirror tags such as `v2.2.0`. Create PHP
 release tags in this monorepo as `server-php-vX.Y.Z`; the mirror workflow publishes the matching
 `vX.Y.Z` tag to `sockudo/sockudo-http-php`.
 
+Create Laravel integration release tags as `server-laravel-vX.Y.Z`; its mirror
+workflow publishes the matching `vX.Y.Z` tag to `sockudo/sockudo-laravel`.
+
 Before pushing a PHP release tag, run the PHP release dry run:
 
 ```bash
 gh workflow run sdk-release.yml -f package=server-php -f dry_run=true
+gh workflow run sdk-release.yml -f package=server-laravel -f dry_run=true
 ```
 
-The mirror workflow requires `PHP_SDK_MIRROR_TOKEN`. Configure the mirror repository description as
-read-only and direct issues and pull requests back to this monorepo.
+The mirror workflows require `PHP_SDK_MIRROR_TOKEN` and
+`LARAVEL_SDK_MIRROR_TOKEN`, respectively. Configure both mirror repository
+descriptions as read-only and direct issues and pull requests back to this
+monorepo.
 
 ### Go Modules
 
@@ -217,6 +229,7 @@ read-only and direct issues and pull requests back to this monorepo.
 | `sockudo` Node server SDK | npm lint/typecheck/local-test and `npm pack --dry-run` | `server-node-vX.Y.Z` |
 | `sockudo-http-python` | Ruff format/check, pytest, build, twine check | `server-python-vX.Y.Z` |
 | `sockudo/sockudo-php-server` | Composer validate, PHP-CS-Fixer, PHPLint, PHPUnit | `server-php-vX.Y.Z` |
+| `sockudo/laravel` | Laravel 12–13 Composer matrix, PHP-CS-Fixer, PHPLint, PHPUnit | `server-laravel-vX.Y.Z` |
 | `sockudo` Ruby gem | RuboCop, RSpec, gem build | `server-ruby-vX.Y.Z` |
 | `github.com/sockudo/sockudo/server-sdks/sockudo-http-go/v2` | gofmt, go vet, go test | `server-sdks/sockudo-http-go/vX.Y.Z` |
 | `sockudo-http` | cargo fmt, clippy, test, package | `server-rust-vX.Y.Z` |

@@ -23,6 +23,16 @@ archived/legacy mirrors.
 | .NET | `SockudoServer` | [.NET](/docs/server-sdks/dotnet) |
 | Swift | `Sockudo` via SwiftPM | [Swift](/docs/server-sdks/swift) |
 
+## Framework integrations
+
+| Framework | Package | Guide |
+| --- | --- | --- |
+| Laravel 12–13 | `sockudo/laravel` | [Laravel](/docs/server-sdks/laravel) |
+
+The Laravel package registers a native `sockudo` broadcasting connection and
+exposes the PHP server SDK through Laravel's container and a facade. Laravel
+Echo continues to use Sockudo's Pusher-compatible Protocol V1 connection.
+
 These packages share the Sockudo/Pusher HTTP signing protocol but differ in
 their typed helpers. When a new Sockudo endpoint is not yet wrapped by a
 language SDK, use its generic signed-request helper or generated signed URI

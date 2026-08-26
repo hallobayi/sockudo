@@ -20,6 +20,7 @@ on:
           - server-node
           - server-python
           - server-php
+          - server-laravel
           - server-ruby
           - server-go
           - server-rust
@@ -43,6 +44,7 @@ on:
       - "server-node-v*"
       - "server-python-v*"
       - "server-php-v*"
+      - "server-laravel-v*"
       - "server-ruby-v*"
       - "server-sdks/sockudo-http-go/v*"
       - "server-rust-v*"
@@ -688,6 +690,46 @@ jobs:
         if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
         run: |
           echo "Packagist publishes from the PHP mirror. Ensure Packagist is hooked to https://github.com/sockudo/sockudo-http-php."
+
+  server-laravel:
+    name: Gate sockudo/laravel
+    runs-on: ubuntu-24.04
+    environment: packagist
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && (inputs.package == 'all' || inputs.package == 'server-laravel')) ||
+        startsWith(github.ref_name, 'server-laravel-v')
+      }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: server-sdks/sockudo-laravel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          coverage: none
+          tools: composer:v2
+          extensions: curl, json, sodium
+
+      - name: Verify package
+        run: |
+          composer validate --strict --no-check-lock
+          composer update --no-interaction --prefer-dist \
+            --with "orchestra/testbench:^11.0" \
+            --with "phpunit/phpunit:^12.0"
+          vendor/bin/php-cs-fixer fix --dry-run --diff --using-cache=no
+          vendor/bin/phplint src config tests
+          vendor/bin/phpunit
+
+      - name: Packagist publish notice
+        if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+        run: |
+          echo "Packagist publishes from the Laravel mirror. Ensure Packagist is hooked to https://github.com/sockudo/sockudo-laravel."
 
   server-go:
     name: Gate sockudo-http-go
