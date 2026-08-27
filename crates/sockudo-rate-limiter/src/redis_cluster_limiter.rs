@@ -49,10 +49,7 @@ impl RedisClusterRateLimiter {
         prefix: String,
         config: RateLimitConfig,
     ) -> Result<Self> {
-        let connection = client
-            .get_async_connection()
-            .await
-            .map_err(|e| Error::Redis(format!("Failed to connect to Redis: {e}")))?;
+        let connection = sockudo_core::redis_client::cluster_connect_with_retry(&client).await?;
 
         Ok(Self {
             client,

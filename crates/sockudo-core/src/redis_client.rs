@@ -2,6 +2,9 @@
 //!
 //! Command connections are cached and cheap to clone. Worker/listener paths can
 //! request a fresh connection so a blocking command never stalls unrelated work.
+//!
+//! Cluster connections do not retry initial node discovery on their own;
+//! use [`cluster_connect_with_retry`] at startup.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,10 +13,29 @@ use parking_lot::Mutex;
 use redis::aio::{ConnectionManager, ConnectionManagerConfig, MultiplexedConnection, PubSub};
 use redis::sentinel::{SentinelClient, SentinelClientBuilder, SentinelServerType};
 use redis::{ClientTlsConfig, ConnectionAddr, IntoConnectionInfo, TlsCertificates, TlsMode};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::error::{Error, Result};
 use crate::options::{RedisTlsOptions, SentinelSpec};
+
+/// Maximum number of connection attempts before giving up.
+const CONNECT_MAX_RETRIES: usize = 5;
+
+/// Exponential backoff multiplier between retries.
+const CONNECT_EXPONENT_BASE: f32 = 2.0;
+
+/// Upper bound on the delay between retries.
+const CONNECT_MAX_DELAY: Duration = Duration::from_millis(5_000);
+
+/// Initial delay (ms) for the cluster startup retry loop.
+const CLUSTER_CONNECT_BASE_DELAY_MS: u64 = 200;
+
+pub fn connection_manager_config() -> ConnectionManagerConfig {
+    ConnectionManagerConfig::new()
+        .set_number_of_retries(CONNECT_MAX_RETRIES)
+        .set_exponent_base(CONNECT_EXPONENT_BASE)
+        .set_max_delay(CONNECT_MAX_DELAY)
+}
 
 enum ClientSource {
     Standalone(redis::Client),
@@ -53,10 +75,7 @@ impl RedisClient {
     pub async fn from_client(client: redis::Client) -> Result<Self> {
         Self::from_source(
             ClientSource::Standalone(client),
-            ConnectionManagerConfig::new()
-                .set_number_of_retries(5)
-                .set_exponent_base(2.0)
-                .set_max_delay(Duration::from_millis(5_000)),
+            connection_manager_config(),
         )
         .await
     }
@@ -75,11 +94,8 @@ impl RedisClient {
 
     /// Connects with explicit direct-TLS and timeout settings.
     pub async fn connect_with_options(url: &str, options: RedisClientOptions) -> Result<Self> {
-        let manager_config = ConnectionManagerConfig::new()
-            .set_number_of_retries(5)
-            .set_exponent_base(2.0)
-            .set_max_delay(Duration::from_millis(5_000))
-            .set_response_timeout(options.response_timeout);
+        let manager_config =
+            connection_manager_config().set_response_timeout(options.response_timeout);
 
         let source = match options.sentinel {
             Some(spec) => {
@@ -327,6 +343,48 @@ pub async fn configure_cluster_builder(
         builder = builder.certs(certificates);
     }
     Ok(builder)
+}
+
+/// Wraps `ClusterClient::get_async_connection` with exponential-backoff retry.
+/// The cluster client does not retry initial node discovery on its own.
+pub async fn cluster_connect_with_retry(
+    client: &redis::cluster::ClusterClient,
+) -> Result<redis::cluster_async::ClusterConnection> {
+    let mut delay_ms = CLUSTER_CONNECT_BASE_DELAY_MS;
+    let mut last_err = None;
+
+    for attempt in 1..=CONNECT_MAX_RETRIES {
+        match client.get_async_connection().await {
+            Ok(conn) => {
+                if attempt > 1 {
+                    info!(attempt, "redis cluster connection established after retry");
+                }
+                return Ok(conn);
+            }
+            Err(e) => {
+                warn!(
+                    attempt,
+                    max_retries = CONNECT_MAX_RETRIES,
+                    retry_in_ms = delay_ms,
+                    error = %e,
+                    "redis cluster initial connection failed, retrying"
+                );
+                last_err = Some(e);
+                let jitter = (delay_ms / 4) as i64;
+                let jittered = (delay_ms as i64 + rand::random_range(-jitter..=jitter)).max(50);
+                tokio::time::sleep(Duration::from_millis(jittered as u64)).await;
+                delay_ms = delay_ms
+                    .saturating_mul(2)
+                    .min(CONNECT_MAX_DELAY.as_millis() as u64);
+            }
+        }
+    }
+
+    Err(Error::Redis(format!(
+        "redis cluster connection failed after {} attempts: {}",
+        CONNECT_MAX_RETRIES,
+        last_err.expect("at least one attempt was made")
+    )))
 }
 
 async fn build_sentinel_client(spec: &SentinelSpec) -> Result<SentinelClient> {

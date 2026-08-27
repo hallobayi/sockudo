@@ -133,12 +133,8 @@ impl ClusterRedisProvider {
             &tls,
         )
         .await?;
-        let connection = command_client
-            .get_async_connection()
-            .await
-            .map_err(|error| {
-                Error::Connection(format!("failed to connect to Redis Cluster: {error}"))
-            })?;
+        let connection =
+            sockudo_core::redis_client::cluster_connect_with_retry(&command_client).await?;
         Ok(Self {
             inner: Arc::new(ClusterInner {
                 command_client,

@@ -61,10 +61,7 @@ impl RedisClusterCacheManager {
             .build()
             .map_err(|e| Error::Cache(format!("Failed to create Redis Cluster client: {e}")))?;
 
-        let connection = client
-            .get_async_connection()
-            .await
-            .map_err(|e| Error::Cache(format!("Failed to connect to Redis Cluster: {e}")))?;
+        let connection = sockudo_core::redis_client::cluster_connect_with_retry(&client).await?;
 
         Ok(Self {
             client,
