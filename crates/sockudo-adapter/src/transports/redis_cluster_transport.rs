@@ -91,19 +91,13 @@ impl HorizontalTransport for RedisClusterTransport {
 
         // Create a persistent connection for publishing
         // This connection will be reused for all publish operations to avoid connection storms
-        let publish_connection = client.get_async_connection().await.map_err(|e| {
-            Error::Redis(format!(
-                "Failed to create Redis Cluster publish connection: {e}"
-            ))
-        })?;
+        let publish_connection =
+            sockudo_core::redis_client::cluster_connect_with_retry(&client).await?;
 
         // Create a dedicated connection for health checks
         // This prevents health check timeouts under high publish load (10K+ msg/s)
-        let health_check_connection = client.get_async_connection().await.map_err(|e| {
-            Error::Redis(format!(
-                "Failed to create Redis Cluster health check connection: {e}"
-            ))
-        })?;
+        let health_check_connection =
+            sockudo_core::redis_client::cluster_connect_with_retry(&client).await?;
 
         let broadcast_channel = format!("{}:#broadcast", config.prefix);
         let request_channel = format!("{}:#requests", config.prefix);
