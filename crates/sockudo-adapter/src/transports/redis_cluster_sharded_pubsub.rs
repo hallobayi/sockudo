@@ -21,6 +21,7 @@ use tracing::{info, warn};
 
 const TOPOLOGY_REFRESH_INTERVAL_SECS: u64 = 30;
 const TOPOLOGY_REFRESH_FAILURE_THRESHOLD: u64 = 3;
+const FAN_IN_CAPACITY: usize = 10_000;
 
 type ShardedPushChannelFlavor = mpsc::Array<redis::PushInfo>;
 type ShardedPushSender = crossfire::MAsyncTx<ShardedPushChannelFlavor>;
@@ -378,6 +379,7 @@ pub(crate) async fn shard_listener_loop(mut params: ShardListenerParams) {
     const MAX_RETRY_DELAY: u64 = 10_000;
     let mut reconnection_count = 0u64;
     let mut consecutive_failures: u64 = 0;
+    let mut fan_in_dropped_count = 0u64;
 
     'outer: loop {
         if !params.is_running.load(Ordering::Relaxed) {
@@ -527,8 +529,23 @@ pub(crate) async fn shard_listener_loop(mut params: ShardListenerParams) {
                     match params.fan_in_tx.try_send(push_info) {
                         Ok(()) => {}
                         Err(crossfire::TrySendError::Full(_)) => {
-                            // Bounded fan-in is full; drop this message.
-                            // The 10 000-cap prevents OOM under sustained backpressure.
+                            fan_in_dropped_count = fan_in_dropped_count.saturating_add(1);
+                            if let Some(metrics) = params.metrics.get() {
+                                metrics.mark_horizontal_transport_message_dropped(
+                                    params.mode.metrics_transport(),
+                                );
+                            }
+                            // Keep the first drop immediately visible without producing one
+                            // warning per message during sustained overload.
+                            if fan_in_dropped_count.is_power_of_two() {
+                                warn!(
+                                    adapter = "redis_cluster",
+                                    shard = %params.shard_addr,
+                                    dropped_count = fan_in_dropped_count,
+                                    queue_capacity_count = FAN_IN_CAPACITY,
+                                    "sharded pub/sub fan-in message dropped"
+                                );
+                            }
                         }
                         Err(crossfire::TrySendError::Disconnected(_)) => {
                             break 'outer; // caller dropped the receiver; stop
@@ -653,7 +670,7 @@ impl ShardedSubscriber {
         );
 
         let (fan_tx, fan_rx): (ShardedPushSender, ShardedPushReceiver) =
-            mpsc::bounded_async(10_000);
+            mpsc::bounded_async(FAN_IN_CAPACITY);
 
         let scheme = if self.seed_urls.iter().any(|u| u.starts_with("rediss://")) {
             "rediss"
@@ -706,18 +723,32 @@ impl ShardedSubscriber {
                     refresh_notify: self.refresh_notify.clone(),
                     tls: self.tls.clone(),
                 };
-                shard_map.insert(shard_addr_str, tokio::spawn(shard_listener_loop(params)));
-                ready_receivers.push(ready_rx);
+                let readiness_channels = params.channels.clone();
+                shard_map.insert(
+                    shard_addr_str.clone(),
+                    tokio::spawn(shard_listener_loop(params)),
+                );
+                ready_receivers.push((shard_addr_str, readiness_channels, ready_rx));
             }
             drop(shard_map);
 
-            let readiness = ready_receivers
-                .into_iter()
-                .map(|ready_rx| tokio::time::timeout(Duration::from_secs(5), ready_rx));
-            for result in futures::future::join_all(readiness).await {
+            let readiness =
+                ready_receivers
+                    .into_iter()
+                    .map(|(shard, channels, ready_rx)| async move {
+                        (
+                            shard,
+                            channels,
+                            tokio::time::timeout(Duration::from_secs(5), ready_rx).await,
+                        )
+                    });
+            for (shard, channels, result) in futures::future::join_all(readiness).await {
                 if !matches!(result, Ok(Ok(()))) {
                     warn!(
                         adapter = "redis_cluster",
+                        shard = %shard,
+                        channel_count = channels.len(),
+                        channels = ?channels,
                         "sharded subscriber initial subscription timed out"
                     );
                 }

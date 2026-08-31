@@ -349,6 +349,7 @@ where
                         request_id = %request_id,
                         request_type = ?request_type,
                         elapsed_ms = start.elapsed().as_millis(),
+                        node_count,
                         responses_received = responses.len(),
                         expected = max_expected_responses,
                         "request timed out"
