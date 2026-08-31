@@ -1,5 +1,13 @@
 use super::*;
 
+/// How long to wait for a NodeDead broadcast before giving up on it.
+///
+/// Deliberately short. The broadcast is an optimisation - it lets followers drop a departed node at
+/// once instead of waiting out their own node_timeout_ms - so a slow publish must never hold up a
+/// cleanup round. Before this bound existed, a publish that never resolved stranded every remaining
+/// dead node in the leader's heartbeat map indefinitely, with nothing logged.
+const NODE_DEAD_PUBLISH_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl<T: HorizontalTransport + 'static> HorizontalAdapterBase<T>
 where
     T::Config: TransportConfig,
@@ -931,6 +939,32 @@ where
                 let dead_nodes = horizontal.get_dead_nodes(node_timeout_ms).await;
 
                 if !dead_nodes.is_empty() {
+                    // Expire locally FIRST, on EVERY node, before any network work.
+                    //
+                    // This used to live inside the `is_leader` branch below, after an unbounded
+                    // publish await, which gave `node_count` two ways to stay wrong forever:
+                    //
+                    //   1. A FOLLOWER never expired anything locally at all - it waited for the
+                    //      leader's NodeDead broadcast. A departed node therefore stayed in its
+                    //      heartbeat map, and get_effective_node_count (heartbeats.len() + 1)
+                    //      stayed too high for as long as that broadcast failed to arrive.
+                    //   2. The LEADER expired one entry per iteration and then awaited the NodeDead
+                    //      publish with no timeout. If that publish never resolved, the loop never
+                    //      reached the remaining entries - and because a pending future is not an
+                    //      error, nothing was logged.
+                    //
+                    // Local expiry is a purely local fact: this heartbeat is already older than
+                    // node_timeout_ms. It has no reason to depend on leader election or on any
+                    // network call succeeding. Doing it up front makes the node count converge even
+                    // when the notification path is broken, which is the property that was missing.
+                    //
+                    // Safe before the election: is_cleanup_leader already excludes `dead_nodes` from
+                    // the pool via `retain`, so removing them from the map first makes that filter a
+                    // no-op rather than changing who wins.
+                    for dead_node_id in &dead_nodes {
+                        horizontal.remove_dead_node(dead_node_id).await;
+                    }
+
                     // Single leader election for entire cleanup round
                     let is_leader = horizontal.is_cleanup_leader(&dead_nodes).await;
 
@@ -945,8 +979,9 @@ where
                         for dead_node_id in dead_nodes {
                             debug!(node_id = %dead_node_id, "processing dead node");
 
-                            // 1. Remove from local heartbeat tracking
-                            horizontal.remove_dead_node(&dead_node_id).await;
+                            // The local heartbeat entry is already gone - expired above, on every
+                            // node, before any network work. What is left here is leader-only: the
+                            // presence-registry cleanup and the single broadcast to followers.
 
                             // 2. Get orphaned members and clean up local registry
                             let cleanup_tasks = match horizontal
@@ -1017,9 +1052,29 @@ where
                                     channels: None,
                                 };
 
-                                if let Err(e) = transport.publish_request(&dead_node_request).await
+                                // BOUNDED. An unbounded await here is what turned a slow
+                                // notification into a permanently wrong node count: the future
+                                // stayed pending, so the loop never reached the next dead node and
+                                // nothing was logged. A timeout makes that silence a logged failure,
+                                // and - now that local expiry happens up front - losing this
+                                // broadcast costs only promptness on followers, not correctness.
+                                match tokio::time::timeout(
+                                    NODE_DEAD_PUBLISH_TIMEOUT,
+                                    transport.publish_request(&dead_node_request),
+                                )
+                                .await
                                 {
-                                    error!(error = %e, "failed to send dead node notification");
+                                    Ok(Ok(())) => {}
+                                    Ok(Err(e)) => {
+                                        error!(error = %e, "failed to send dead node notification");
+                                    }
+                                    Err(_) => {
+                                        error!(
+                                            dead_node_id = %dead_node_id,
+                                            timeout_ms = NODE_DEAD_PUBLISH_TIMEOUT.as_millis() as u64,
+                                            "timed out publishing dead node notification; followers will expire this node locally instead"
+                                        );
+                                    }
                                 }
                             }
                         }
