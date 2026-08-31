@@ -6,9 +6,18 @@ use std::sync::OnceLock;
 use tracing::warn;
 
 // Histogram buckets for internal operations (in milliseconds)
-// Optimized for sub-millisecond to low-millisecond measurements
+//
+// Fine at the bottom because the common case is sub-millisecond to low-millisecond, and extended
+// past 1000 because the only metric using these - horizontal_adapter_resolve_time - measures a
+// cross-pod request whose default request_timeout_ms is 1000. Topping out at 10 meant every timed
+// out request landed in +Inf, so histogram_quantile returned the top bucket and p95/p99 were pinned
+// there: exactly the tail the metric exists to show was the part it could not express. On a
+// four-cluster deployment 5-9% of requests exceeded 10ms, which is enough to clip p95 permanently.
+//
+// The original boundaries are all still here, so low-end buckets stay comparable across the change.
 pub(super) const INTERNAL_LATENCY_HISTOGRAM_BUCKETS: &[f64] = &[
-    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0,
+    1000.0, 2500.0,
 ];
 
 // Histogram buckets for end-to-end operations (in milliseconds)
