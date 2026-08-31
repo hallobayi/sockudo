@@ -1,5 +1,4 @@
 use ahash::AHashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use sockudo_adapter::horizontal_adapter::{
     BroadcastMessage, RequestBody, RequestType, ResponseBody,
@@ -14,6 +13,7 @@ use sockudo_core::websocket::SocketId;
 use sonic_rs::{Value, json};
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::Mutex;
 
